@@ -100,5 +100,86 @@ export class CourseService {
       },
     });
   }
+
+  /**
+   * Lists all courses for a user
+   * 
+   * @param userId - The ID of the user
+   * @returns Promise resolving to array of courses with module counts
+   */
+  static async listCoursesByUser(userId: string) {
+    return await prisma.course.findMany({
+      where: { userId },
+      include: {
+        modules: {
+          select: { id: true },
+          orderBy: { order: 'asc' },
+        },
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+  }
+
+  /**
+   * Updates a course and its modules
+   * 
+   * @param courseId - The ID of the course to update
+   * @param updates - Partial course data to update
+   * @returns Promise resolving to updated course
+   */
+  static async updateCourse(
+    courseId: string,
+    updates: {
+      title?: string;
+      description?: string;
+      topic?: string;
+      difficulty?: string;
+    }
+  ) {
+    return await prisma.course.update({
+      where: { id: courseId },
+      data: updates,
+      include: {
+        modules: {
+          orderBy: { order: 'asc' },
+        },
+      },
+    });
+  }
+
+  /**
+   * Updates a syllabus module
+   * 
+   * @param moduleId - The ID of the module to update
+   * @param updates - Partial module data to update
+   * @returns Promise resolving to updated module
+   */
+  static async updateModule(
+    moduleId: string,
+    updates: {
+      title?: string;
+      description?: string;
+      order?: number;
+      duration?: string | null;
+    }
+  ) {
+    return await prisma.syllabusModule.update({
+      where: { id: moduleId },
+      data: updates,
+    });
+  }
+
+  /**
+   * Deletes a course and all its modules
+   * 
+   * @param courseId - The ID of the course to delete
+   */
+  static async deleteCourse(courseId: string) {
+    return await prisma.course.delete({
+      where: { id: courseId },
+    });
+  }
 }
 

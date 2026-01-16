@@ -25,6 +25,8 @@ export class AIService {
     ): Promise<CourseData> {
         const prompt = `You are an expert educational content creator. Generate a comprehensive course syllabus in JSON format.
 
+CRITICAL: You MUST return ONLY valid, well-formed JSON. No markdown, no code blocks, no explanations. Just pure JSON.
+
 The response must be valid JSON matching this exact structure:
 {
   "title": "Course Title",
@@ -34,10 +36,24 @@ The response must be valid JSON matching this exact structure:
       "title": "Module Title",
       "description": "Module description",
       "order": 1,
-      "duration": "2 hours" (optional)
+      "duration": "2 hours"
+    },
+    {
+      "title": "Module Title 2",
+      "description": "Module description 2",
+      "order": 2,
+      "duration": "3 hours"
     }
   ]
 }
+
+IMPORTANT JSON RULES:
+- Every array element must be separated by a comma
+- Every object property must be separated by a comma
+- All strings must be properly escaped (use \\" for quotes inside strings)
+- No trailing commas before closing brackets or braces
+- Ensure all brackets and braces are properly closed
+- The "duration" field is optional - omit it if not needed, don't set it to null
 
 Requirements:
 - Create 6-8 modules for ${difficulty} level
@@ -49,7 +65,7 @@ Requirements:
 Create a course syllabus for: ${topic}
 Difficulty level: ${difficulty}
 
-Generate a comprehensive syllabus with modules that progressively build knowledge. Return ONLY valid JSON, no additional text.`;
+Generate a comprehensive syllabus with modules that progressively build knowledge. Return ONLY valid JSON - no markdown code blocks, no explanations, just the JSON object.`;
 
         try {
             // Get available models dynamically, fallback to static list
@@ -119,13 +135,109 @@ Generate a comprehensive syllabus with modules that progressively build knowledg
 
             // Extract JSON from response if it's wrapped in markdown code blocks
             let jsonContent = content.trim();
+            
+            // Remove markdown code blocks
             if (jsonContent.startsWith("```json")) {
                 jsonContent = jsonContent.replace(/^```json\s*/i, "").replace(/\s*```$/i, "");
             } else if (jsonContent.startsWith("```")) {
                 jsonContent = jsonContent.replace(/^```\s*/, "").replace(/\s*```$/, "");
             }
 
-            const parsedData = JSON.parse(jsonContent) as CourseData;
+            // Try to find JSON object in the content if it's not pure JSON
+            const jsonMatch = jsonContent.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+                jsonContent = jsonMatch[0];
+            }
+
+            // Clean up common issues with AI-generated JSON
+            // Remove trailing commas before closing braces/brackets
+            jsonContent = jsonContent.replace(/,(\s*[}\]])/g, "$1");
+            
+            // Fix missing commas between array elements or object properties
+            // This regex adds commas where they're missing between values
+            jsonContent = jsonContent.replace(/("\s*)(\n\s*")/g, '$1,$2'); // Missing comma between string properties
+            jsonContent = jsonContent.replace(/(\}\s*)(\n\s*\{)/g, '$1,$2'); // Missing comma between objects
+            jsonContent = jsonContent.replace(/(\]\s*)(\n\s*\[)/g, '$1,$2'); // Missing comma between arrays
+            jsonContent = jsonContent.replace(/(\}\s*)(\n\s*")/g, '$1,$2'); // Missing comma between object and string
+            jsonContent = jsonContent.replace(/(\]\s*)(\n\s*")/g, '$1,$2'); // Missing comma between array and string
+            
+            // Try to parse JSON with better error handling
+            let parsedData: CourseData;
+            try {
+                parsedData = JSON.parse(jsonContent) as CourseData;
+            } catch (parseError) {
+                // If parsing fails, try more aggressive fixes
+                console.warn("Initial JSON parse failed, attempting to fix:", parseError);
+                
+                // Try to find the JSON object boundaries more carefully
+                const firstBrace = jsonContent.indexOf("{");
+                const lastBrace = jsonContent.lastIndexOf("}");
+                
+                if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+                    jsonContent = jsonContent.substring(firstBrace, lastBrace + 1);
+                }
+                
+                // More aggressive comma fixing
+                // Fix missing commas in arrays (between elements)
+                jsonContent = jsonContent.replace(/([}\]"])\s*\n\s*(["{])/g, '$1,$2');
+                // Fix missing commas after values before closing brackets/braces
+                jsonContent = jsonContent.replace(/([^,}\]])\s*(\n\s*[}\]])/g, '$1$2');
+                // Add commas between array/object elements more aggressively
+                jsonContent = jsonContent.replace(/([}\]"])\s*(\n\s*)([{"\d-])/g, '$1,$3');
+                
+                // Remove trailing commas again after fixes
+                jsonContent = jsonContent.replace(/,(\s*[}\]])/g, "$1");
+                
+                // Try parsing again
+                try {
+                    parsedData = JSON.parse(jsonContent) as CourseData;
+                } catch (secondError) {
+                    // Last attempt: try to manually extract and reconstruct the JSON structure
+                    // This is a fallback that tries to extract the essential data
+                    try {
+                        // Extract title
+                        const titleMatch = jsonContent.match(/"title"\s*:\s*"([^"]+)"/);
+                        const descMatch = jsonContent.match(/"description"\s*:\s*"([^"]*)"/);
+                        
+                        // Extract modules using a more flexible regex
+                        const modulesMatch = jsonContent.match(/"modules"\s*:\s*\[([\s\S]*)\]/);
+                        
+                        if (titleMatch && modulesMatch) {
+                            // Try to parse modules individually
+                            const modulesText = modulesMatch[1];
+                            const moduleMatches = modulesText.matchAll(/\{[\s\S]*?"title"\s*:\s*"([^"]+)"[\s\S]*?"description"\s*:\s*"([^"]*)"[\s\S]*?"order"\s*:\s*(\d+)[\s\S]*?\}/g);
+                            
+                            const modules: SyllabusModuleData[] = [];
+                            for (const match of moduleMatches) {
+                                modules.push({
+                                    title: match[1],
+                                    description: match[2],
+                                    order: parseInt(match[3]),
+                                });
+                            }
+                            
+                            if (modules.length > 0) {
+                                parsedData = {
+                                    title: titleMatch[1],
+                                    description: descMatch ? descMatch[1] : "",
+                                    modules: modules.sort((a, b) => a.order - b.order),
+                                };
+                            } else {
+                                throw secondError;
+                            }
+                        } else {
+                            throw secondError;
+                        }
+                    } catch (thirdError) {
+                        // Log the problematic content for debugging
+                        console.error("JSON parsing failed after all attempts. Content preview:", jsonContent.substring(0, 1000));
+                        console.error("Parse error:", parseError);
+                        throw new Error(
+                            `Invalid JSON received from AI. The response contains malformed JSON that couldn't be automatically fixed. Please try generating again. Original error: ${parseError instanceof Error ? parseError.message : String(parseError)}`
+                        );
+                    }
+                }
+            }
 
             // Validate the structure
             if (
