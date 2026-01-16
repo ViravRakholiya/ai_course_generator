@@ -8,9 +8,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
  *
  * @throws {Error} If GEMINI_API_KEY is not configured
  */
-export const gemini = new GoogleGenerativeAI(
-    process.env.GEMINI_API_KEY ?? ""
-);
+export const gemini = new GoogleGenerativeAI(process.env.GEMINI_API_KEY ?? "");
 
 /**
  * List of model names to try in order of preference
@@ -27,7 +25,7 @@ export const AVAILABLE_MODELS = [
 /**
  * Lists all available models from the Gemini API using REST API
  * Useful for debugging to see which models are actually available
- * 
+ *
  * @returns Promise resolving to array of model names that support generateContent
  */
 export async function listAvailableModels(): Promise<string[]> {
@@ -40,7 +38,7 @@ export async function listAvailableModels(): Promise<string[]> {
         const response = await fetch(
             `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`
         );
-        
+
         if (!response.ok) {
             console.warn("Failed to fetch models list, using fallback models");
             return AVAILABLE_MODELS.slice();
@@ -48,10 +46,10 @@ export async function listAvailableModels(): Promise<string[]> {
 
         const data = await response.json();
         const models = data.models || [];
-        
+
         // Filter models that support generateContent
         const supportedModels = models
-            .filter((model: { supportedGenerationMethods?: string[] }) => 
+            .filter((model: { supportedGenerationMethods?: string[] }) =>
                 model.supportedGenerationMethods?.includes("generateContent")
             )
             .map((model: { name: string }) => {
@@ -59,7 +57,9 @@ export async function listAvailableModels(): Promise<string[]> {
                 return model.name.replace("models/", "");
             });
 
-        return supportedModels.length > 0 ? supportedModels : AVAILABLE_MODELS.slice();
+        return supportedModels.length > 0
+            ? supportedModels
+            : AVAILABLE_MODELS.slice();
     } catch (error) {
         console.error("Error listing models:", error);
         return AVAILABLE_MODELS.slice();
